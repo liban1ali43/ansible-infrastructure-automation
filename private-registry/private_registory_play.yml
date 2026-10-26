@@ -1,0 +1,228 @@
+- name: Deploy Private Container Registry
+  hosts: control-node 
+  become: true
+
+  # Non-secret variables
+  vars_files:
+    - vars/main.yml
+    # Encrypted secrets (password + user)
+    - locker.yml
+
+  tasks:
+
+    # 1. INSTALL REQUIRED PACKAGES
+    # container-tools : Podman, Buildah, Skopeo
+    # nginx           : Reverse proxy
+    # httpd-tools     : Provides htpasswd command (no passlib)
+    # openssl         : Certificate generation
+    - name: Install required packages
+      ansible.builtin.dnf:
+        name:
+          - container-tools
+          - nginx
+          - httpd-tools
+          - openssl
+        state: present
+
+    # 2. DNS CONFIGURATION (nmcli)
+    - name: Configure DNS servers on network interface
+      ansible.builtin.command:
+        cmd: nmcli connection modify {{ network_interface }} ipv4.dns "{{ dns_servers }}"
+      changed_when: true
+
+    - name: Apply network changes
+      ansible.builtin.command:
+        cmd: nmcli connection up {{ network_interface }}
+      changed_when: true
+
+    # 3. DISABLE DEFAULT NGINX SERVER (Port 80 Conflict)
+     
+    #- name: Comment out port 80 and default include lines
+     # ansible.builtin.replace:
+       # path: /etc/nginx/nginx.conf
+        #regexp: '(?m)^(        )(listen\s+80;|listen\s+\[::\]:80;|include\s+/etc/nginx/default\.d/\*\.conf;)'
+        #replace: '#\1\2'
+     # notify: reload nginx
+  
+    # 4. CREATE REGISTRY AUTH + HTPASSWD
+    # Password comes from locker.yml (vault-encrypted).
+    # Uses htpasswd command directly — no passlib needed.
+    #   -B = bcrypt hashing
+    #   -c = create file
+    #   -i = read password from stdin (secure)
+    - name: Create registry auth directory
+      ansible.builtin.file:
+        path: "{{ registry_auth_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Create htpasswd file with bcrypt hash
+      ansible.builtin.command:
+        cmd: "htpasswd -Bci {{ registry_htpasswd }} {{ registry_user }}"
+        stdin: "{{ registry_password }}"
+      args:
+        creates: "{{ registry_htpasswd }}"
+      no_log: true
+      notify: reload nginx
+    # 5. CREATE REGISTRY DATA DIRECTORY
+    - name: Create registry data directory
+      ansible.builtin.file:
+        path: "{{ registry_data_dir }}"
+        state: directory
+        mode: '0755'
+    
+    - name: Ensure nfs-utils Latest Version Installed 
+      ansible.builtin.yum:
+        name: nfs-utils
+        state: latest  
+    
+    - name: Enable virt_use_nfs for container write access
+      ansible.posix.seboolean:
+        name: virt_use_nfs
+        state: true
+        persistent: true
+
+    - name: Mount NFS share to registry data directory
+      ansible.posix.mount:
+        path:  /var/lib/containers/registry
+        src: "nfs-server:/var/nfs/registry"
+        fstype: nfs
+        state: mounted    
+    
+    # 6. DEPLOY QUADLET FILE
+    # Quadlet replaces deprecated "podman generate systemd".
+    # systemd reads the .container file and manages lifecycle.
+    - name: Ensure Quadlet directory exists
+      ansible.builtin.file:
+        path: /etc/containers/systemd
+        state: directory
+        mode: '0755'
+
+    - name: Deploy registry Quadlet file
+      ansible.builtin.copy:
+        src: files/registry.container
+        dest: /etc/containers/systemd/registry.container
+        mode: '0644'
+      notify: reload systemd
+
+
+    - name: Start registry service (generated from Quadlet)
+      ansible.builtin.systemd:
+        name: registry.service
+        state: started
+        enabled: true
+        daemon_reload: true 
+    # 7. TLS CERTIFICATE GENERATION
+    - name: Create nginx SSL directory
+      ansible.builtin.file:
+        path: "{{ nginx_ssl_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Generate self-signed TLS certificate
+      ansible.builtin.command:
+        cmd: >
+          openssl req -x509 -nodes -days 365 -newkey rsa:2048
+          -keyout {{ nginx_key }}
+          -out {{ nginx_cert }}
+          -subj "/C=GB/ST=England/L=London/O=Lab/CN={{ registry_hostname }}"
+          -addext "subjectAltName=DNS:{{ registry_hostname }}"
+        creates: "{{ nginx_cert }}"
+
+    - name: Secure private key permissions
+      ansible.builtin.file:
+        path: "{{ nginx_key }}"
+        mode: '0600'
+
+    # 8. NGINX REVERSE PROXY CONFIGURATION
+    - name: Deploy nginx registry 
+      ansible.builtin.copy:
+        dest: /etc/nginx/conf.d/registry.conf
+        mode: '0644'
+        content: |
+          server {
+              listen 443 ssl;
+              server_name {{ registry_hostname }};
+
+              ssl_certificate     {{ nginx_cert }};
+              ssl_certificate_key {{ nginx_key }};
+
+              location / {
+                  client_max_body_size 0;
+                  proxy_read_timeout 900s;
+                  proxy_send_timeout 900s;
+                  proxy_request_buffering off;
+
+                  proxy_pass http://127.0.0.1:5000;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+              }
+          }
+      notify: reload nginx
+
+
+    # 9. CONTAINER REGISTRIES CONFIGURATION
+    - name: Configure unqualified-search-registries
+      ansible.builtin.copy:
+        dest: /etc/containers/registries.conf.d/myregistry.conf
+        mode: '0644'
+        content: |
+          unqualified-search-registries = ["{{ registry_hostname }}"]
+          [[registry]]
+          insecure = false
+          blocked = false
+          location = "{{ registry_hostname }}"
+          short-name-mode = "enforcing"
+
+    # 10. TRUST CERTIFICATE FOR PODMAN/SKOPEO
+    - name: Create containers certs.d directory
+      ansible.builtin.file:
+        path: "/etc/containers/certs.d/{{ registry_hostname }}"
+        state: directory
+        mode: '0755'
+
+    - name: Copy CA cert for container tools
+      ansible.builtin.copy:
+        src: "{{ nginx_cert }}"
+        dest: "/etc/containers/certs.d/{{ registry_hostname }}/ca.crt"
+        remote_src: true
+        mode: '0644'
+
+    # 11. SELINUX + NGINX VALIDATION
+    - name: Allow httpd network connections (SELinux)
+      ansible.builtin.command:
+        cmd: setsebool -P httpd_can_network_connect 1
+      changed_when: false
+    
+    - name: Ensure nginx is enabled and started
+      ansible.builtin.systemd:
+        name: nginx
+        state: started
+        enabled: true
+    - name: Permanently enable https service, also enable it immediately if possible
+      ansible.posix.firewalld:
+        service: https
+        state: enabled
+        permanent: true
+        immediate: true
+
+    - name: Test nginx configuration
+      ansible.builtin.command:
+        cmd: nginx -t
+      register: nginx_test
+      changed_when: false
+
+    - name: Show nginx test result
+      ansible.builtin.debug:
+        var: nginx_test.stderr_lines
+
+  # HANDLERS
+  handlers:
+    - name: reload nginx
+      ansible.builtin.systemd:
+        name: nginx
+        state: reloaded
+
+    - name: reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true

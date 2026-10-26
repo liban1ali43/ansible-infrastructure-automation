@@ -1,0 +1,20 @@
+[Unit]
+Description=Private Container Registry
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=docker.io/library/registry:latest
+ContainerName=registry
+PublishPort=5000:5000
+Volume=/var/lib/containers/registry:/var/lib/registry:Z
+Volume=/opt/registry/auth:/auth:Z
+Environment=REGISTRY_AUTH=htpasswd
+Environment=REGISTRY_AUTH_HTPASSWD_REALM=Authentication Required
+Environment=REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

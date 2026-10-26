@@ -1,0 +1,11 @@
+2026-10-14T15:35:39.536470+00:00 WARNING 'ansible_navigator.image_manager.puller._log_message' Image inspection failed, image assumed to be corrupted or missing
+2026-10-14T15:35:39.536542+00:00 WARNING 'ansible_navigator.image_manager.puller._log_message' stdout: []
+
+2026-10-14T15:35:39.536560+00:00 WARNING 'ansible_navigator.image_manager.puller._log_message' stderr: Error: server.lab.example.com/my-custom-ee-supported-rhel9:1.0: image not known
+
+2026-10-14T15:35:39.602878+00:00 ERROR 'ansible_navigator.image_manager.puller._log_message' Execution environment pull failed
+2026-10-14T15:40:36.051696+00:00 WARNING 'ansible_navigator.image_manager.puller._log_message' Image inspection failed, image assumed to be corrupted or missing
+2026-10-14T15:40:36.051758+00:00 WARNING 'ansible_navigator.image_manager.puller._log_message' stdout: []
+
+2026-10-14T15:40:36.051775+00:00 WARNING 'ansible_navigator.image_manager.puller._log_message' stderr: Error: server.lab.example.com/my-custom-ee-supported-rhel9:latest: image not known
+

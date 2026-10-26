@@ -1,0 +1,30 @@
+# =========================================================
+# REGISTRY CONFIGURATION (non-secret)
+# =========================================================
+
+# Hostname of the registry server
+registry_hostname: "server.lab.example.com"
+
+# =========================================================
+# PATHS
+# =========================================================
+registry_data_dir: "/var/lib/containers/registry"
+registry_auth_dir: "/opt/registry/auth"
+registry_htpasswd: "/opt/registry/auth/htpasswd"
+
+# TLS certificate paths (private.key as requested)
+nginx_ssl_dir: "/etc/nginx/ssl"
+nginx_cert: "/etc/nginx/ssl/public.crt"
+nginx_key: "/etc/nginx/ssl/private.key"
+
+# =========================================================
+# NETWORK
+# =========================================================
+network_interface: "enp10s0"
+dns_servers: "8.8.8.8 192.168.84.2"
+
+# =========================================================
+# SECRETS (loaded from vault-encrypted locker.yml)
+# =========================================================
+registry_user: "{{ vault_registry_user }}"
+registry_password: "{{ vault_registry_password }}"

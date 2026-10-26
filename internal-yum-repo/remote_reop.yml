@@ -1,0 +1,23 @@
+---
+- name: Configure custom YUM repositories
+  hosts: all
+  become: true
+
+  tasks:
+    - name: Configure BaseOS repository
+      ansible.builtin.yum_repository:
+        name: BaseOS
+        description: Remote Repo 
+        baseurl: http://server.lab.example.com/repo/BaseOS/
+        gpgcheck: yes
+        enabled: yes
+        gpgkey: http://server.lab.example.com/repo/RPM-GPG-KEY-remote-repo
+
+    - name: Configure AppStream repository
+      ansible.builtin.yum_repository:
+        name: AppStream
+        description: Remote Repo 
+        baseurl: http://server.lab.example.com/repo/AppStream/
+        gpgcheck: yes
+        enabled: yes
+        gpgkey: http://server.lab.example.com/repo/RPM-GPG-KEY-remote-repo

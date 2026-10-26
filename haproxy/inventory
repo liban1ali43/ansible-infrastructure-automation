@@ -1,0 +1,14 @@
+[dev]
+servera
+ 
+[webservers]
+serverb
+serverc
+
+[test]
+serverc
+
+[balancers]
+serverd
+
+

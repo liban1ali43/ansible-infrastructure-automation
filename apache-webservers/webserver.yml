@@ -1,0 +1,27 @@
+- name: web server page
+  hosts: webservers
+ 
+  tasks:
+  
+    - name: Install the latest version of Apache
+      ansible.builtin.yum:
+        name: httpd
+        state: latest
+    
+    - name: Start service httpd, if not started
+      ansible.builtin.service:
+        name: httpd
+        state: started
+        enabled: yes
+ 
+    - name: Copy using inline content
+      ansible.builtin.copy:
+        content:  "Hi from {{ ansible_hostname }} and ip address of the server is {{ ansible_all_ipv4_addresses | first }}\n"
+        dest: /var/www/html/index.html
+
+    - name: Permanently enable http  service, also enable it immediately if possible
+      ansible.posix.firewalld:
+        service: http
+        state: enabled
+        permanent: true
+        immediate: true
